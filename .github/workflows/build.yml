@@ -1,0 +1,42 @@
+name: build-android-arm64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "patches/**"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc || true
+          df -h /
+
+      - name: Install NDK r27
+        run: |
+          echo "y" | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: Install rust android target
+        run: rustup target add aarch64-linux-android
+
+      - name: Build
+        run: bash scripts/build-android-arm64.sh
+        env:
+          BUILD_DIR: ${{ github.workspace }}/logos-chat-build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: logos-libchat-android-arm64-v8a
+          path: out/arm64-v8a/
+          if-no-files-found: error

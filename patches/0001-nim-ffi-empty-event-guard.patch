@@ -1,0 +1,38 @@
+Guard empty/nil event payloads in callEventCallback (nim-ffi 0.1.x).
+
+`callEventCallback` passes `unsafeAddr event[0]` (and `unsafeAddr msg[0]` in the
+except branch) to the C `FFICallBack`. For an empty Nim string the data pointer
+is nil, so `event[0]` dereferences nil -> SIGSEGV on the first empty-payload
+event (in practice: first peer connect, via the health monitor's
+connection_status_change event).
+
+Upstream issue: https://github.com/logos-messaging/nim-ffi/issues/139
+Fixed on nim-ffi master (unreleased); every released tag (v0.1.3/4/5) is
+affected, and logos-delivery pins v0.1.3.
+
+Apply with -p1 inside the vendored nimble package directory
+(nimbledeps/pkgs2/ffi-0.1.3-*/) AFTER `make build-deps` has populated it.
+
+--- a/ffi/ffi_context.nim
++++ b/ffi/ffi_context.nim
+@@ -36,14 +36,18 @@
+     try:
+       let event = body
+       cast[FFICallBack](ctx[].eventCallback)(
+-        RET_OK, unsafeAddr event[0], cast[csize_t](len(event)), ctx[].eventUserData
++        RET_OK,
++        (if len(event) > 0: unsafeAddr event[0] else: nil),
++        cast[csize_t](len(event)), ctx[].eventUserData
+       )
+     except Exception, CatchableError:
+       let msg =
+         "Exception " & eventName & " when calling 'eventCallBack': " &
+         getCurrentExceptionMsg()
+       cast[FFICallBack](ctx[].eventCallback)(
+-        RET_ERR, unsafeAddr msg[0], cast[csize_t](len(msg)), ctx[].eventUserData
++        RET_ERR,
++        (if len(msg) > 0: unsafeAddr msg[0] else: nil),
++        cast[csize_t](len(msg)), ctx[].eventUserData
+       )
+ 
+ proc sendRequestToFFIThread*(
