@@ -152,3 +152,62 @@ NDK r27 (27.1.12297006), Nim 2.2.4, host = wild (Ubuntu, x86_64).
 Everything else that was a wall on libdelivery (nat-libs `-mssse3`, cross/Docker for rust,
 nimbledeps population order) either does not exist in this repo's build system or was avoided by
 following the map. Total time upstream-clone → SMOKE OK: ~1h15m.
+
+---
+
+## Session 2026-07-23 — MIX SUPERSET build (M4 #29)
+
+Target: `logos-messaging/logos-chat` @ branch `feat/logos-testnetv02-mix`
+(`6b4d83a4b684b9856543bc1af811b5f069ff1377`) — the AnonComms mix build. Superset of the
+standard build: all 12 standard exports + `chat_get_mix_status`. Reproducible via
+`scripts/build-android-arm64-mix.sh`. On-device (Pixel arm64) smoke reported mix status JSON —
+`{"mixEnabled":true,"mixReady":false,"mixPoolSize":0,"minPoolSize":4}`. Deltas vs the standard
+build above:
+
+### M-N1 — the nwaku submodule is a different repo, on the nimble-deps model
+- The mix branch repoints `vendor/nwaku` → `logos-messaging/logos-delivery` @
+  `feat/logos-testnetv02-mix` (libp2p-mix fork). Its modules are namespaced `logos_delivery/…`,
+  not `waku/…`.
+- logos-delivery uses **nimble deps** (`nimbledeps/pkgs2`) not vendored submodules. logos-chat's
+  mix `config.nims` adds every `vendor/nwaku/nimbledeps/pkgs2/*` (+ `/src`) to the Nim path and
+  skips the nwaku-vendored `ffi-*` pkg (declareLibrary clash with `vendor/nim-ffi`). **So they
+  must be populated:** `cd vendor/nwaku && make build-deps` (`nimble setup --localdeps` off
+  `nimble.lock`; pulls nim-libp2p, chronos, …). ~10–15 min, mostly git.
+
+### M-N2 — csources `-j` race (pre-cleared class, resurfaced)
+- `make -j$(nproc) update` failed once building the in-tree Nim (`build-nim Error 1`); a plain
+  `make update` retry cleared it (idempotent). The build script does `-j … || make update`.
+
+### M-N3 — rln is no longer in the rust-bundle; link it separately (v2.0.2 stateless)
+- Mix `rust-bundle/Cargo.toml` drops `rln` (`lib.rs` = `extern crate libchat;`); the bundle is
+  libchat-only (~45 MB .a) — same plain-cargo cross as M0.
+- RLN is linked as **zerokit v2.0.2 stateless static** `librln_v2.0.2.a`. Cross-built for arm64
+  with the NDK cargo env: `cargo build --release --target aarch64-linux-android
+  --no-default-features --features stateless` in `vendor/nwaku/vendor/zerokit/rln` (feature
+  flags per nwaku `scripts/build_rln.sh`; `--no-default-features` because `stateless` and the
+  default `pmtree-ft` Merkle backend are mutually exclusive). Kept STATIC (single .so, matching
+  the desktop 39.5 MB mix binary) rather than the darwin cdylib path.
+
+### M-N4 — nat-libs `-mssse3` wall (this time it DID fire)
+- The mix nwaku's `Nat.mk` `rebuild-nat-libs-nimbledeps` derives `-mssse3` from host `uname -m`
+  (unlike the standard build's `targets.mk`). Override on the command line:
+  `make -C vendor/nwaku rebuild-nat-libs-nimbledeps CC=<ndk arm64 clang> NAT_UNAME_M=aarch64`
+  (command-line assignment beats the `:=`), after cleaning the host-built `.a/.o`.
+
+### M-N5 — Nim link: WIN first try (no link walls)
+- Add `-d:libp2p_mix_experimental_exit_is_dest` (mix Makefile's `NIM_PARAMS`) and link both
+  archives: `--passL:$RUST_BUNDLE --passL:librln_v2.0.2.a --passL:-Wl,--allow-multiple-definition`
+  (the linux mix path — the duplicated Rust runtime symbols resolve to the first copy).
+  Result: 37.1 MB → 28.3 MB stripped, 13 chat FFI exports incl `chat_get_mix_status`,
+  `libc++_shared.so` in DT_NEEDED. `refc`, 148 s link.
+- nim-ffi empty-event guard (W3 above) **still required** — patch after `make update`, before
+  the link, else a SIGSEGV on the first empty event.
+
+### Mix wall summary
+| # | Wall | Fix (exact) |
+|---|------|-------------|
+| M-N1 | nwaku=logos-delivery on nimble-deps; waku modules missing on Nim path | `cd vendor/nwaku && make build-deps` to populate `nimbledeps/pkgs2` |
+| M-N2 | in-tree Nim `-j` csources race | `make -j update || make update` (idempotent retry) |
+| M-N3 | rln dropped from rust-bundle | link zerokit v2.0.2 stateless static `librln_v2.0.2.a` separately, `--allow-multiple-definition` |
+| M-N4 | nat-libs `-mssse3` from host uname | `rebuild-nat-libs-nimbledeps CC=<arm64 clang> NAT_UNAME_M=aarch64` after cleaning host .a/.o |
+| M-N5 (class) | mix define + dual-archive link | `-d:libp2p_mix_experimental_exit_is_dest`; `--passL:<bundle> --passL:<librln> --passL:-Wl,--allow-multiple-definition` |

@@ -13,6 +13,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        # standard = the M0 build (12 chat_* exports); mix = the AnonComms
+        # superset (12 + chat_get_mix_status). The app vendors the mix superset.
+        variant: [standard, mix]
     steps:
       - uses: actions/checkout@v4
 
@@ -29,14 +35,30 @@ jobs:
       - name: Install rust android target
         run: rustup target add aarch64-linux-android
 
-      - name: Build
+      - name: Build (standard)
+        if: matrix.variant == 'standard'
         run: bash scripts/build-android-arm64.sh
         env:
           BUILD_DIR: ${{ github.workspace }}/logos-chat-build
 
-      - name: Upload artifacts
+      - name: Build (mix superset)
+        if: matrix.variant == 'mix'
+        run: bash scripts/build-android-arm64-mix.sh
+        env:
+          BUILD_DIR: ${{ github.workspace }}/logos-chat-mix-build
+
+      - name: Upload artifacts (standard)
+        if: matrix.variant == 'standard'
         uses: actions/upload-artifact@v4
         with:
           name: logos-libchat-android-arm64-v8a
           path: out/arm64-v8a/
+          if-no-files-found: error
+
+      - name: Upload artifacts (mix superset)
+        if: matrix.variant == 'mix'
+        uses: actions/upload-artifact@v4
+        with:
+          name: logos-libchat-android-arm64-v8a-mix
+          path: out/arm64-v8a-mix/
           if-no-files-found: error

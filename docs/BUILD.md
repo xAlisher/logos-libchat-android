@@ -59,7 +59,19 @@ build/push/run commands.
 (nimbus-build-system builds its own); NDK r27 via sdkmanager; rustup target add. Not bit-for-bit
 reproducible vs `prebuilt/` (toolchain drift) — functional equivalence is what's checked.
 
+## Mix superset variant (M4)
+
+`scripts/build-android-arm64-mix.sh` builds the **AnonComms mix superset** from the
+`feat/logos-testnetv02-mix` branch — a strict superset: all 12 standard `chat_*` exports PLUS
+`chat_get_mix_status`, with the libp2p Mix protocol + Kademlia mix discovery + zerokit v2.0.2
+stateless RLN compiled in. Prebuilt in `prebuilt/arm64-v8a-mix/`; `scripts/smoke-mix.c` boots
+`mixEnabled:true` and prints the mix status JSON. The Android app vendors THIS `.so` as its
+single binary (`mixEnabled:false` == standard behaviour). Build deltas + walls are in
+`docs/build-fork-tree.md` (§ "MIX SUPERSET build"). CI builds both variants via the
+`variant: [standard, mix]` matrix.
+
 ## ABI status
 
-- **arm64-v8a** — built, proven on-device (see fork-tree log for the smoke transcript).
+- **arm64-v8a** — standard + mix superset, both built, both proven on-device (see fork-tree log
+  for the smoke transcripts).
 - Nothing else. Emulators can't run the arm64 Nim `.so`; validate on a real phone.
